@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { FieldNode, VisibilityCondition } from '../types/form'
 import { useDesignerStore } from '../stores/designer'
+import { findNode, getNodePath } from '../utils/schema'
 
 const store = useDesignerStore()
 const node = computed(() => store.selectedNode)
@@ -39,9 +40,19 @@ function clearCondition() {
 }
 
 function setConditionField(fieldId: string) {
-  const condition: VisibilityCondition = { fieldId, operator: node.value?.condition?.operator ?? 'equals', value: node.value?.condition?.value ?? '' }
+  const refNode = findNode(store.nodes, fieldId)
+  const fieldPath = refNode ? getNodePath(store.nodes, fieldId) : ''
+  const condition: VisibilityCondition = {
+    fieldId,
+    fieldPath,
+    operator: node.value?.condition?.operator ?? 'equals',
+    value: node.value?.condition?.value ?? '',
+    broken: false,
+  }
   patch({ condition })
 }
+
+const conditionBroken = computed(() => !!node.value?.condition?.broken)
 </script>
 
 <template>
@@ -113,6 +124,14 @@ function setConditionField(fieldId: string) {
 
       <section class="property-group">
         <h4>联动条件</h4>
+        <el-alert
+          v-if="conditionBroken"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 10px"
+          title="条件已失效：引用字段被删除或改名，预览已按始终显示重算。请重新选择引用字段。"
+        />
         <el-form label-position="top" size="small">
           <el-form-item class="form-item-compact" label="当字段">
             <el-select :model-value="node.condition?.fieldId" clearable style="width: 100%" @change="setConditionField">

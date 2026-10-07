@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, View } from '@element-plus/icons-vue'
+import { Document, EditPen, View } from '@element-plus/icons-vue'
 import { useDesignerStore } from './stores/designer'
 
 const route = useRoute()
 const router = useRouter()
 const store = useDesignerStore()
-const activeView = computed(() => route.name === 'preview' ? 'preview' : 'designer')
+const activeView = computed(() => {
+  if (route.name === 'preview') return 'preview'
+  if (route.name === 'sessions') return 'sessions'
+  return 'designer'
+})
 
 function switchView(view: string) {
   store.commitDraft()
-  router.push(view === 'preview' ? '/preview' : '/')
+  if (view === 'preview') router.push('/preview')
+  else if (view === 'sessions') router.push('/sessions')
+  else router.push('/')
 }
 </script>
 
@@ -31,6 +37,10 @@ function switchView(view: string) {
           <el-radio-button value="designer">
             <el-icon><Document /></el-icon>
             设计器
+          </el-radio-button>
+          <el-radio-button value="sessions">
+            <el-icon><EditPen /></el-icon>
+            填写会话
           </el-radio-button>
           <el-radio-button value="preview">
             <el-icon><View /></el-icon>

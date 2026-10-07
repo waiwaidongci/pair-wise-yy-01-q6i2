@@ -75,8 +75,8 @@ function nodeDragStart(event: DragEvent) {
       <div class="node-label">
         {{ node.label }}
         <span v-if="node.validation?.required" class="required-dot">*</span>
-        <el-tag v-if="node.condition?.fieldId" class="condition-tag" size="small" type="warning" effect="light">
-          联动
+        <el-tag v-if="node.condition?.fieldId" class="condition-tag" size="small" :type="node.condition.broken ? 'danger' : 'warning'" effect="light">
+          {{ node.condition.broken ? '联动失效' : '联动' }}
         </el-tag>
       </div>
 

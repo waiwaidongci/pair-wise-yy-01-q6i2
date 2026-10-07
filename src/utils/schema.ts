@@ -1,4 +1,4 @@
-import type { FieldNode, RuntimeValueMap, ValidationRule, VisibilityCondition } from '../types/form'
+import type { FieldNode, FormSchema, PendingAnswer, RuntimeValueMap, ValidationRule, VisibilityCondition } from '../types/form'
 import { createId } from './id'
 
 export function cloneSchema<T>(value: T): T {
@@ -44,6 +44,35 @@ export function typeLabel(type: FieldNode['type']): string {
 
 export function flattenNodes(nodes: FieldNode[]): FieldNode[] {
   return nodes.flatMap((node) => [node, ...flattenNodes(node.children ?? [])])
+}
+
+export interface PathNode {
+  node: FieldNode
+  path: string
+}
+
+/** 按字段标识（name）层级生成路径，如 reasonSection/detail */
+export function walkWithPaths(nodes: FieldNode[], parentPath = ''): PathNode[] {
+  return nodes.flatMap((node) => {
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name
+    return [{ node, path }, ...walkWithPaths(node.children ?? [], path)]
+  })
+}
+
+export function buildPathMap(nodes: FieldNode[]): Map<string, FieldNode> {
+  const map = new Map<string, FieldNode>()
+  for (const { node, path } of walkWithPaths(nodes)) map.set(path, node)
+  return map
+}
+
+export function getNodePath(nodes: FieldNode[], id: string, parentPath = ''): string | undefined {
+  for (const node of nodes) {
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name
+    if (node.id === id) return path
+    const found = getNodePath(node.children ?? [], id, path)
+    if (found !== undefined) return found
+  }
+  return undefined
 }
 
 export function findNode(nodes: FieldNode[], id: string): FieldNode | undefined {
@@ -97,9 +126,24 @@ export function moveNode(nodes: FieldNode[], sourceId: string, targetParentId?: 
   insertNode(nodes, cloned, targetParentId, targetIndex)
 }
 
-export function evaluateCondition(condition: VisibilityCondition | undefined, values: RuntimeValueMap): boolean {
+/**
+ * 联动条件求值。
+ * - 引用字段被删除 → fail-open（可见）
+ * - 字段标识改名导致路径快照失效 → fail-open 并标记 broken
+ * - 其余按当前路径取值比较
+ */
+export function evaluateCondition(
+  condition: VisibilityCondition | undefined,
+  values: RuntimeValueMap,
+  nodes: FieldNode[],
+): boolean {
   if (!condition?.fieldId) return true
-  const current = values[condition.fieldId]
+  if (condition.broken) return true
+  const refNode = findNode(nodes, condition.fieldId)
+  if (!refNode) return true
+  const currentPath = getNodePath(nodes, condition.fieldId)
+  if (condition.fieldPath && currentPath && condition.fieldPath !== currentPath) return true
+  const current = currentPath ? values[currentPath] : undefined
   const compare = condition.value
   switch (condition.operator) {
     case 'equals': return String(current ?? '') === String(compare)
@@ -109,6 +153,22 @@ export function evaluateCondition(condition: VisibilityCondition | undefined, va
     case 'lessThan': return Number(current) < Number(compare)
     default: return true
   }
+}
+
+/** 找出所有失效的联动条件（引用字段被删或改名） */
+export function findBrokenConditions(nodes: FieldNode[]): Array<{ node: FieldNode; condition: VisibilityCondition }> {
+  const broken: Array<{ node: FieldNode; condition: VisibilityCondition }> = []
+  const walk = (items: FieldNode[]) => items.forEach((node) => {
+    if (node.condition?.fieldId) {
+      const refNode = findNode(nodes, node.condition.fieldId)
+      const currentPath = refNode ? getNodePath(nodes, node.condition.fieldId) : undefined
+      const isBroken = !refNode || (!!node.condition.fieldPath && node.condition.fieldPath !== currentPath)
+      if (isBroken) broken.push({ node, condition: node.condition })
+    }
+    walk(node.children ?? [])
+  })
+  walk(nodes)
+  return broken
 }
 
 export function validateValue(value: unknown, rule?: ValidationRule): string | null {
@@ -131,6 +191,54 @@ export function validateValue(value: unknown, rule?: ValidationRule): string | n
   return null
 }
 
+export interface MigrationResult {
+  values: RuntimeValueMap
+  pending: PendingAnswer[]
+}
+
+/**
+ * 按字段路径把旧版本答案迁移到新版本。
+ * - 路径能对上且类型一致 → 直接补入
+ * - 对不上 → 两边值都保留，列为待处理
+ * 纯函数，无副作用；调用方在拿到结果后再提交，保证迁移失败可重试。
+ */
+export function migrateAnswers(
+  oldSchema: FormSchema,
+  newSchema: FormSchema,
+  oldValues: RuntimeValueMap,
+): MigrationResult {
+  const oldPaths = buildPathMap(oldSchema.nodes)
+  const newPaths = buildPathMap(newSchema.nodes)
+  const values: RuntimeValueMap = {}
+  const pending: PendingAnswer[] = []
+
+  for (const [path, oldValue] of Object.entries(oldValues)) {
+    const oldNode = oldPaths.get(path)
+    const newNode = newPaths.get(path)
+    if (newNode && oldNode && newNode.type === oldNode.type) {
+      values[path] = oldValue
+    } else {
+      const label = oldNode?.label ?? path
+      pending.push({
+        path,
+        label,
+        oldValue,
+        newValue: newNode?.defaultValue,
+        reason: !newNode ? 'missing_in_new' : 'type_changed',
+        detail: !newNode
+          ? `字段「${label}」在新版本中已删除或移动，原答案保留待处理`
+          : `字段「${label}」类型由 ${oldNode?.type ?? '未知'} 变为 ${newNode.type}，原答案保留待处理`,
+      })
+    }
+  }
+  return { values, pending }
+}
+
+/** 发布时冻结 Schema：深拷贝一份不可变快照 */
+export function freezeSchema(schema: FormSchema): FormSchema {
+  return cloneSchema(schema)
+}
+
 export function createStarterSchema() {
   const name = createField('input')
   name.label = '申请人姓名'
@@ -148,7 +256,7 @@ export function createStarterSchema() {
   amount.name = 'amount'
   amount.placeholder = '请输入金额'
   amount.validation = { required: true, pattern: '^\\d+(\\.\\d{1,2})?$', message: '请输入合法金额，最多两位小数' }
-  amount.condition = { fieldId: type.id, operator: 'notEquals', value: '其他' }
+  amount.condition = { fieldId: type.id, fieldPath: 'requestType', operator: 'notEquals', value: '其他' }
 
   const date = createField('date')
   date.label = '期望日期'
@@ -168,7 +276,7 @@ export function createStarterSchema() {
   const table = createField('table')
   table.label = '费用明细'
   table.name = 'expenses'
-  table.condition = { fieldId: type.id, operator: 'equals', value: '差旅报销' }
+  table.condition = { fieldId: type.id, fieldPath: 'requestType', operator: 'equals', value: '差旅报销' }
 
   return {
     version: 1 as const,

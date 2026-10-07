@@ -1,31 +1,37 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject } from 'vue'
 import { Delete, Plus } from '@element-plus/icons-vue'
 import type { FieldNode, RuntimeValueMap } from '../types/form'
 import { evaluateCondition, validateValue } from '../utils/schema'
 
 const props = defineProps<{
   node: FieldNode
+  path: string
   values: RuntimeValueMap
   errors: Record<string, string>
 }>()
 
 const emit = defineEmits<{
-  update: [fieldName: string, value: unknown]
-  error: [fieldName: string, error: string]
+  update: [path: string, value: unknown]
+  error: [path: string, error: string]
 }>()
 
-const visible = computed(() => evaluateCondition(props.node.condition, props.values))
+const rootNodes = inject<FieldNode[]>('formRootNodes', [])
+const visible = computed(() => evaluateCondition(props.node.condition, props.values, rootNodes))
 const isContainer = computed(() => props.node.type === 'group' || props.node.type === 'container')
 const tableRows = computed(() => {
-  const value = props.values[props.node.name]
+  const value = props.values[props.path]
   return Array.isArray(value) ? value as Array<Record<string, unknown>> : []
 })
 
+function childPath(child: FieldNode): string {
+  return `${props.path}/${child.name}`
+}
+
 function update(value: unknown) {
-  emit('update', props.node.name, value)
+  emit('update', props.path, value)
   const error = validateValue(value, props.node.validation)
-  emit('error', props.node.name, error ?? '')
+  emit('error', props.path, error ?? '')
 }
 
 function addTableRow() {
@@ -51,10 +57,11 @@ function removeTableRow(rowIndex: number) {
         v-for="child in node.children"
         :key="child.id"
         :node="child"
+        :path="childPath(child)"
         :values="values"
         :errors="errors"
-        @update="(name, value) => emit('update', name, value)"
-        @error="(name, error) => emit('error', name, error)"
+        @update="(path, value) => emit('update', path, value)"
+        @error="(path, error) => emit('error', path, error)"
       />
     </div>
     <div v-else class="runtime-field">
@@ -64,13 +71,13 @@ function removeTableRow(rowIndex: number) {
       </div>
       <el-input
         v-if="node.type === 'input'"
-        :model-value="values[node.name] as string"
+        :model-value="values[path] as string"
         :placeholder="node.placeholder"
         @update:model-value="update"
       />
       <el-select
         v-else-if="node.type === 'select'"
-        :model-value="values[node.name]"
+        :model-value="values[path]"
         :placeholder="node.placeholder"
         style="width: 100%"
         @update:model-value="update"
@@ -79,7 +86,7 @@ function removeTableRow(rowIndex: number) {
       </el-select>
       <el-date-picker
         v-else-if="node.type === 'date'"
-        :model-value="values[node.name] as string"
+        :model-value="values[path] as string"
         type="date"
         value-format="YYYY-MM-DD"
         :placeholder="node.placeholder"
@@ -112,7 +119,7 @@ function removeTableRow(rowIndex: number) {
           </el-button>
         </div>
       </div>
-      <div v-if="errors[node.name]" class="error-text">{{ errors[node.name] }}</div>
+      <div v-if="errors[path]" class="error-text">{{ errors[path] }}</div>
     </div>
   </template>
 </template>

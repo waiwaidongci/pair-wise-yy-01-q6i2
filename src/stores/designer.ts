@@ -1,14 +1,33 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { FieldNode, FormSchema } from '../types/form'
-import { cloneSchema, createField, createStarterSchema, findNode, insertNode, moveNode, removeNode } from '../utils/schema'
+import { cloneSchema, createField, createStarterSchema, findBrokenConditions, findNode, getNodePath, insertNode, moveNode, removeNode } from '../utils/schema'
+import { useRuntimeStore } from './runtime'
 
 const STORAGE_KEY = 'formcraft-schema-v1'
+
+/** 归一化旧草稿：为缺少 fieldPath 的联动条件补路径快照，并清掉失效标记 */
+function normalizeDraft(nodes: FieldNode[]) {
+  const walk = (items: FieldNode[]) => items.forEach((node) => {
+    if (node.condition?.fieldId) {
+      const currentPath = getNodePath(nodes, node.condition.fieldId)
+      if (!node.condition.fieldPath) node.condition.fieldPath = currentPath
+      const broken = findBrokenConditions(nodes).some((item) => item.node.id === node.id)
+      node.condition.broken = broken
+    }
+    walk(node.children ?? [])
+  })
+  walk(nodes)
+}
 
 function loadInitialSchema(): FormSchema {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as FormSchema
+    if (raw) {
+      const parsed = JSON.parse(raw) as FormSchema
+      normalizeDraft(parsed.nodes)
+      return parsed
+    }
   } catch {
     // Ignore invalid local drafts and fall back to the demo form.
   }
@@ -95,7 +114,20 @@ export const useDesignerStore = defineStore('designer', () => {
     if (!selectedId.value) return
     mutate((draft) => {
       const node = findNode(draft, selectedId.value!)
-      if (node) Object.assign(node, cloneSchema(patch))
+      if (!node) return
+      Object.assign(node, cloneSchema(patch))
+      if (patch.name !== undefined) {
+        // 字段标识一改（含祖先容器改名导致后代路径变化），所有相关联动条件立即失效，预览随之重算
+        const walk = (items: FieldNode[]) => items.forEach((item) => {
+          if (item.condition?.fieldId) {
+            const refNode = findNode(draft, item.condition.fieldId)
+            const currentPath = refNode ? getNodePath(draft, item.condition.fieldId) : undefined
+            item.condition.broken = !refNode || (!!item.condition.fieldPath && item.condition.fieldPath !== currentPath)
+          }
+          walk(item.children ?? [])
+        })
+        walk(draft)
+      }
     }, '属性已更新')
   }
 
@@ -196,6 +228,17 @@ export const useDesignerStore = defineStore('designer', () => {
     scheduleSave()
   }
 
+  /** 发布当前草稿：冻结为不可变版本，草稿继续独立编辑 */
+  function publishCurrent(note = '') {
+    const runtime = useRuntimeStore()
+    const version = runtime.publishVersion(schema.value, note)
+    saveState.value = `已发布 v${version.number}，草稿可继续修改`
+    return version
+  }
+
+  /** 当前草稿中失效的联动条件（引用字段被删或改名） */
+  const brokenConditions = computed(() => findBrokenConditions(nodes.value))
+
   recordHistory()
 
   return {
@@ -222,6 +265,8 @@ export const useDesignerStore = defineStore('designer', () => {
     undo,
     redo,
     replaceSchema,
+    publishCurrent,
+    brokenConditions,
     commitDraft,
     mutate,
   }
