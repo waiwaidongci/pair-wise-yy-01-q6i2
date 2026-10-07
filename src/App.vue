@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, View } from '@element-plus/icons-vue'
+import { Document, EditPen, View } from '@element-plus/icons-vue'
 import { useDesignerStore } from './stores/designer'
 
 const route = useRoute()
 const router = useRouter()
 const store = useDesignerStore()
-const activeView = computed(() => route.name === 'preview' ? 'preview' : 'designer')
+const activeView = computed(() => (route.name === 'preview' ? 'preview' : route.name === 'fill' ? 'fill' : 'designer'))
 
 function switchView(view: string) {
-  store.commitDraft()
-  router.push(view === 'preview' ? '/preview' : '/')
+  if (view === activeView.value) return
+  store.saveDraft()
+  router.push(view === 'preview' ? '/preview' : view === 'fill' ? '/fill' : '/')
 }
 </script>
 
@@ -29,12 +30,16 @@ function switchView(view: string) {
         <span class="save-state">{{ store.saveState }}</span>
         <el-radio-group :model-value="activeView" @change="switchView">
           <el-radio-button value="designer">
-            <el-icon><Document /></el-icon>
+            <el-icon><EditPen /></el-icon>
             设计器
           </el-radio-button>
           <el-radio-button value="preview">
             <el-icon><View /></el-icon>
-            实时预览
+            草稿预览
+          </el-radio-button>
+          <el-radio-button value="fill">
+            <el-icon><Document /></el-icon>
+            填单会话
           </el-radio-button>
         </el-radio-group>
       </div>

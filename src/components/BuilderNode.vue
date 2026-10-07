@@ -13,6 +13,10 @@ const props = defineProps<{
 const store = useDesignerStore()
 const selected = computed(() => store.selectedId === props.node.id)
 const isContainer = computed(() => props.node.type === 'group' || props.node.type === 'container')
+const conditionBroken = computed(() => {
+  const path = props.node.condition?.fieldPath
+  return !!path && !store.fieldPaths.has(path)
+})
 
 function selectNode() {
   store.selectedId = props.node.id
@@ -75,9 +79,15 @@ function nodeDragStart(event: DragEvent) {
       <div class="node-label">
         {{ node.label }}
         <span v-if="node.validation?.required" class="required-dot">*</span>
-        <el-tag v-if="node.condition?.fieldId" class="condition-tag" size="small" type="warning" effect="light">
-          联动
-        </el-tag>
+        <el-tooltip
+          v-if="node.condition?.fieldPath"
+          :content="conditionBroken ? `联动目标 ${node.condition.fieldPath} 已失效，标识变更后请重选` : `联动条件：${node.condition.fieldPath}`"
+          placement="top"
+        >
+          <el-tag class="condition-tag" size="small" :type="conditionBroken ? 'danger' : 'warning'" effect="light">
+            {{ conditionBroken ? '联动失效' : '联动' }}
+          </el-tag>
+        </el-tooltip>
       </div>
 
       <el-input v-if="node.type === 'input'" :placeholder="node.placeholder" disabled />

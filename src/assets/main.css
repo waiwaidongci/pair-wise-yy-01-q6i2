@@ -145,3 +145,36 @@ body { overflow: hidden; }
 .runtime-table-cell:last-child { border-right: 0; }
 .runtime-table-row.head .runtime-table-cell { background: #f5f7fa; color: #4e5d72; font-weight: 700; }
 .summary-box { margin-top: 22px; padding: 14px; border-radius: 7px; background: #f5f8fc; color: #526176; font-size: 12px; }
+
+/* 填单工作台 */
+.fill-layout { height: 100%; display: grid; grid-template-columns: 280px 1fr; background: #dce3ec; gap: 1px; }
+.fill-sessions { min-height: 0; background: #fff; display: flex; flex-direction: column; }
+.fill-main { min-height: 0; background: #edf1f6; display: flex; flex-direction: column; }
+.fill-scroll { flex: 1; min-height: 0; }
+.fill-empty { margin: auto; color: #7b8798; font-size: 14px; }
+.session-item {
+  padding: 11px 13px;
+  border-bottom: 1px solid #eef1f5;
+  cursor: pointer;
+  transition: .12s;
+}
+.session-item:hover { background: #f6f9ff; }
+.session-item.active { background: #eef5ff; box-shadow: inset 3px 0 0 #3b82f6; }
+.session-item-row { display: flex; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+.ahead-hint { color: #b7791f; margin-top: 4px; }
+.fill-card-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.fill-version { display: flex; gap: 6px; flex-shrink: 0; padding-top: 4px; }
+.field-path-hint { margin-left: 6px; color: #94a3b8; font-size: 11px; font-weight: 400; }
+.table-empty { padding: 10px; text-align: center; }
+.name-input-error :deep(.el-input__wrapper), .name-input-error .el-input__wrapper { box-shadow: 0 0 0 1px #e5484d inset; }
+
+/* 迁移面板 */
+.conflict-list { display: grid; gap: 10px; margin-bottom: 14px; }
+.conflict-card { border-color: #ecd8b6; }
+.conflict-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.conflict-value { font-size: 13px; color: #334155; margin-bottom: 8px; }
+.conflict-value code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }
+.conflict-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.retained-card { border-color: #cfe0f7; margin-bottom: 14px; }
+.retained-row { display: flex; gap: 10px; align-items: center; padding: 5px 0; font-size: 13px; }
+.retained-row code { background: #f1f5f9; padding: 1px 6px; border-radius: 4px; }

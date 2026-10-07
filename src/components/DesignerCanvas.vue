@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useDropZone } from '@vueuse/core'
-import { RefreshLeft, RefreshRight, Upload } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Promotion, RefreshLeft, RefreshRight, Upload } from '@element-plus/icons-vue'
 import { useDesignerStore } from '../stores/designer'
+import { useReleaseStore } from '../stores/release'
 import type { FieldNode } from '../types/form'
 import BuilderNode from './BuilderNode.vue'
 
 const emit = defineEmits<{ importJson: [] }>()
 const store = useDesignerStore()
+const releaseStore = useReleaseStore()
 const canvasRef = ref<HTMLElement | null>(null)
+const publishing = ref(false)
 
 useDropZone(canvasRef, {
   dataTypes: ['application/x-form-field'],
@@ -29,6 +33,31 @@ function handleDrop(event: DragEvent) {
   const type = event.dataTransfer?.getData('application/x-form-field') as FieldNode['type']
   if (type) store.addField(type)
 }
+
+async function publish() {
+  if (!store.draftDirty) {
+    ElMessage.info('草稿与已发布版本一致，没有待发布内容')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '发布将冻结当前草稿的字段结构、校验规则与联动条件。已开始的填单会话仍按其开始时版本运行，之后可手动迁移到新版本。',
+      '确认发布新版本',
+      { confirmButtonText: '冻结并发布', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  publishing.value = true
+  try {
+    const revision = store.publish()
+    ElMessage.success(`已发布 v${revision.rev}，后续修改只保留在新草稿中`)
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '发布失败，草稿未受影响')
+  } finally {
+    publishing.value = false
+  }
+}
 </script>
 
 <template>
@@ -46,7 +75,15 @@ function handleDrop(event: DragEvent) {
           </el-button>
         </el-button-group>
         <el-divider direction="vertical" />
-        <span class="muted">拖拽节点可排序或进入分组/容器</span>
+        <el-tag v-if="releaseStore.latestRevision" size="small" type="success" effect="plain">
+          已发布 v{{ releaseStore.latestRevision.rev }}
+        </el-tag>
+        <el-tag v-else size="small" type="info" effect="plain">尚未发布</el-tag>
+        <el-tag v-if="store.draftDirty" size="small" type="warning" effect="light">草稿有未发布修改</el-tag>
+        <el-button type="primary" :loading="publishing" @click="publish">
+          <el-icon><Promotion /></el-icon>
+          发布版本
+        </el-button>
       </div>
       <el-button type="primary" plain @click="emit('importJson')">
         <el-icon><Upload /></el-icon>
@@ -60,14 +97,18 @@ function handleDrop(event: DragEvent) {
         @dragover.prevent
         @drop="handleDrop"
       >
-        <el-input v-model="store.title" class="form-title-input" @change="store.commitDraft('标题已更新')" />
         <el-input
-          v-model="store.description"
+          :model-value="store.title"
+          class="form-title-input"
+          @update:model-value="store.setTitle($event)"
+        />
+        <el-input
+          :model-value="store.description"
           type="textarea"
           :rows="2"
           resize="none"
           style="margin-bottom: 20px"
-          @change="store.commitDraft('说明已更新')"
+          @update:model-value="store.setDescription($event)"
         />
         <BuilderNode
           v-for="(node, index) in store.nodes"

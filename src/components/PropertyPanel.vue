@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import type { FieldNode, VisibilityCondition } from '../types/form'
 import { useDesignerStore } from '../stores/designer'
 
@@ -7,14 +8,38 @@ const store = useDesignerStore()
 const node = computed(() => store.selectedNode)
 const optionText = ref('')
 const columnText = ref('')
+const nameDraft = ref('')
+const nameError = ref('')
 
 watch(node, (value) => {
   optionText.value = value?.options?.join('\n') ?? ''
   columnText.value = value?.columns?.map((item) => `${item.key}:${item.label}`).join('\n') ?? ''
+  nameDraft.value = value?.name ?? ''
+  nameError.value = ''
 }, { immediate: true })
 
 function patch(patchValue: Partial<FieldNode>) {
   store.updateSelected(patchValue)
+}
+
+function commitName() {
+  if (!node.value) return
+  const next = nameDraft.value.trim()
+  if (next === node.value.name) {
+    nameError.value = ''
+    nameDraft.value = node.value.name
+    return
+  }
+  const error = store.renameField(node.value.id, next)
+  if (error) {
+    nameError.value = error
+    ElMessage.warning(error)
+    // 标识非法：回到生效中的旧值，避免 UI 误以为已修改
+    nameDraft.value = node.value.name
+    return
+  }
+  nameError.value = ''
+  ElMessage.success('字段标识已更新，相关联动条件已重算')
 }
 
 function patchValidation(key: keyof NonNullable<FieldNode['validation']>, value: unknown) {
@@ -38,10 +63,19 @@ function clearCondition() {
   store.updateSelected({ condition: undefined })
 }
 
-function setConditionField(fieldId: string) {
-  const condition: VisibilityCondition = { fieldId, operator: node.value?.condition?.operator ?? 'equals', value: node.value?.condition?.value ?? '' }
+function setConditionField(fieldPath: string) {
+  const condition: VisibilityCondition = {
+    fieldPath,
+    operator: node.value?.condition?.operator ?? 'equals',
+    value: node.value?.condition?.value ?? '',
+  }
   patch({ condition })
 }
+
+const conditionBroken = computed(() => {
+  const path = node.value?.condition?.fieldPath
+  return !!path && !store.fieldPaths.has(path)
+})
 </script>
 
 <template>
@@ -57,8 +91,16 @@ function setConditionField(fieldId: string) {
           <el-form-item class="form-item-compact" label="显示标题">
             <el-input :model-value="node.label" @update:model-value="patch({ label: $event })" />
           </el-form-item>
-          <el-form-item class="form-item-compact" label="字段标识">
-            <el-input :model-value="node.name" @update:model-value="patch({ name: $event })" />
+          <el-form-item class="form-item-compact" label="字段标识（修改后联动立即重算）">
+            <el-input
+              v-model="nameDraft"
+              :class="{ 'name-input-error': nameError }"
+              placeholder="字母/下划线开头，如 applicantName"
+              @keyup.enter="commitName"
+              @blur="commitName"
+            />
+            <div v-if="nameError" class="error-text">{{ nameError }}</div>
+            <div v-else class="muted" style="margin-top: 4px">标识是联动与答案迁移的唯一键，需全表单唯一</div>
           </el-form-item>
           <el-form-item v-if="node.type === 'input' || node.type === 'select' || node.type === 'date'" class="form-item-compact" label="占位提示">
             <el-input :model-value="node.placeholder" @update:model-value="patch({ placeholder: $event })" />
@@ -78,7 +120,7 @@ function setConditionField(fieldId: string) {
       </section>
 
       <section v-if="node.type !== 'group' && node.type !== 'container' && node.type !== 'table'" class="property-group">
-        <h4>校验规则</h4>
+        <h4>校验规则（发布时冻结）</h4>
         <el-checkbox
           :model-value="node.validation?.required"
           @update:model-value="patchValidation('required', $event)"
@@ -112,14 +154,29 @@ function setConditionField(fieldId: string) {
       </section>
 
       <section class="property-group">
-        <h4>联动条件</h4>
+        <h4>联动条件（按字段路径引用）</h4>
+        <el-alert
+          v-if="conditionBroken"
+          type="error"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 10px"
+          title="目标字段标识已变更或被删除，当前条件已失效"
+          description="重新选择条件字段后恢复联动。"
+        />
         <el-form label-position="top" size="small">
           <el-form-item class="form-item-compact" label="当字段">
-            <el-select :model-value="node.condition?.fieldId" clearable style="width: 100%" @change="setConditionField">
-              <el-option v-for="field in store.flatFields" :key="field.id" :label="field.label" :value="field.id" />
+            <el-select
+              :model-value="node.condition?.fieldPath"
+              clearable
+              style="width: 100%"
+              placeholder="选择触发字段"
+              @change="setConditionField"
+            >
+              <el-option v-for="field in store.flatFields" :key="field.path" :label="`${field.node.label}（${field.path}）`" :value="field.path" />
             </el-select>
           </el-form-item>
-          <template v-if="node.condition?.fieldId">
+          <template v-if="node.condition?.fieldPath">
             <el-form-item class="form-item-compact" label="判断方式">
               <el-select :model-value="node.condition.operator" style="width: 100%" @change="store.updateCondition({ operator: $event as VisibilityCondition['operator'] })">
                 <el-option label="等于" value="equals" />
